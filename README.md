@@ -35,7 +35,7 @@ The same settings as typed shortcuts (`/clickable-links help` prints this list):
 
 | Command | Effect |
 | --- | --- |
-| `/clickable-links files reveal\|open` | a click on a file: select it in Finder (default) · open it in its app |
+| `/clickable-links files reveal\|open` | a click on a file: select it in Finder (default) · open it in its app (scripts and apps are still only revealed) |
 | `/clickable-links folders open\|reveal` | a click on a folder: open it (default) · select it in its parent folder |
 | `/clickable-links paths whole\|off` | link each path as one link (default) · leave paths as text |
 | `/clickable-links blocks on\|off` | a clickable `↳` line under code blocks that name paths |
@@ -57,9 +57,14 @@ Settings are kept across sessions.
   Paths through a symlink are not linked.
 - **Left alone:** fenced code blocks, inline code (unless the whole span is a path or SHA), existing markdown links and
   autolinks, a `#` inside a URL or a path, and SHA-like words that are colours, numbers or file names.
-- **Clicks.** A plain click on a file or folder runs `open -R <path>` or `open <path>` (argument lists only, never a
-  shell), after a fresh lookup: a path deleted since the reply was drawn opens nothing and says so. Remote credentials in
-  a remote URL (`https://user:token@…`) never reach a link.
+- **Clicks never run anything.** A plain click runs `open -R <file>` (select in Finder), `open -a Finder <folder>`
+  (so an app bundle, which is a folder, shows its contents instead of launching), or with `files open` the file's own
+  app — except scripts, apps, installers, location files and extensionless files, which are only revealed, with a
+  note. Argument lists only, never a shell, after a fresh lookup: a path deleted since the reply was drawn opens
+  nothing and says so.
+- **Only links the mod made are clickable this way.** A `file://` link written into the reply itself is left to Claude
+  Code; the mod answers clicks only on links it created from a path it verified. Credentials in a remote URL
+  (`https://user:token@…`) never reach a link.
 
 ## Terminals
 
@@ -84,7 +89,7 @@ Settings are kept across sessions.
 
 ```sh
 claude plugin validate .
-claude plugin test .     # 58 tests
+claude plugin test .     # 61 tests
 tsc -p .                 # after the engine has laid .claude-plugin/types/
 claude --plugin-dir .    # try it in a session
 ```

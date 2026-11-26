@@ -13,7 +13,7 @@ import { forgeCache } from './forge'
 import type { Forge } from './forge'
 import { outputTexts } from './output'
 import { DEFAULTS, MAX_FILE_HREFS, beforePaths, fileHrefs, transform, webHrefs } from './pipeline'
-import { probes, rootOf, walk } from './paths'
+import { escapeLabel, probes, rootOf, walk } from './paths'
 import type { Ctx, Entry, Kind, Lister, Mode, Prefs } from './paths'
 import { DEFAULT_CLICKS, pathOfFileHref, pressPlan } from './press'
 import type { Clicks } from './press'
@@ -177,20 +177,17 @@ async function press($: EngineInterface, href: string): Promise<void> {
   const ctx = await ctxOf($)
   const kindNow = path === undefined ? undefined : ((await kindOf($, path, ctx, await $.clock.now(), true)) ?? undefined)
   const plan = pressPlan(href, kindNow, clicks)
-  if ('toast' in plan) return $.ui.toast(plan.toast)
-  await $.process.run(plan.argv, { timeoutMs: OPEN_TIMEOUT_MS })
+  if (plan.toast !== undefined) $.ui.toast(plan.toast)
+  if (plan.argv !== undefined) await $.process.run(plan.argv, { timeoutMs: OPEN_TIMEOUT_MS })
 }
 
-// The characters a markdown link label must escape: matches "[" and "]" in "a [b] c"; nothing in "plain".
-// Tester: https://regex101.com/?regex=%5B%5C%5C%5B%5C%5D%5D&flags=g&testString=a%20%5Bb%5D%20c%0Aplain
-const LABEL_SPECIAL = /[\\[\]]/g
 // A link target that needs <...>: matches "https://w.org/Foo_(bar)"; rejects "https://a.dev/x".
 // Tester: https://regex101.com/?regex=%5B%28%29%5Cs%3C%3E%5D&flags=&testString=https%3A%2F%2Fw.org%2FFoo_%28bar%29%0Ahttps%3A%2F%2Fa.dev%2Fx
 const NEEDS_BRACKETS = /[()\s<>]/
 
-/** A markdown link whose label and target cannot break out of it. */
-const mdLink = (label: string, href: string): string =>
-  `[${label.replace(LABEL_SPECIAL, c => `\\${c}`)}](${NEEDS_BRACKETS.test(href) ? `<${href}>` : href})`
+/** A markdown link whose label and target cannot break out of it; the label escaped as path-links
+ * escapes its own (`\`, backticks, `*`, `_`, `[`, `]`, `<`, `>`, `~` stay literal). */
+const mdLink = (label: string, href: string): string => `[${escapeLabel(label)}](${NEEDS_BRACKETS.test(href) ? `<${href}>` : href})`
 
 /** The engine's tool row with `↗` link rows under it: native links, or in Apple Terminal (where a
  * plain click never opens a native link) one Markdown whose links this mod opens on a plain click. */
@@ -352,7 +349,11 @@ export const register: Register = (on, options) => {
       out = transform(text, forge, ctx, prefs, abs => cache.get(abs)?.kind ?? undefined)
       // Only the fullscreen terminal reports plain clicks; elsewhere the surface follows file:// itself.
       const ours = e.surface === 'terminal' && e.viewport?.isFullscreen !== false && (await revealable($))
-      hrefs = ours ? [...fileHrefs(out), ...((await inAppleTerminal($)) ? webHrefs(out) : [])].slice(0, MAX_FILE_HREFS) : []
+      // Only file links the path stage made from a verified path are pressable: a file:// link the
+      // model wrote itself (already there before the path stage) stays the surface's own.
+      const written = new Set(fileHrefs(beforePaths(text, forge)))
+      const made = fileHrefs(out).filter(h => !written.has(h))
+      hrefs = ours ? [...made, ...((await inAppleTerminal($)) ? webHrefs(out) : [])].slice(0, MAX_FILE_HREFS) : []
       own = hrefs.length > 0
     } catch {
       return next(e) // never in the way of a reply

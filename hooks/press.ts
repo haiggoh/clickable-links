@@ -7,9 +7,25 @@
 import type { Kind } from './paths'
 
 export type Clicks = { files: 'reveal' | 'open'; folders: 'open' | 'reveal' }
-export type PressPlan = { argv: string[] } | { toast: string }
+/** The `open` call to run (with a note to show beside it), or only a note when nothing runs. */
+export type PressPlan = { argv: string[]; toast?: string } | { toast: string; argv?: undefined }
 
 export const DEFAULT_CLICKS: Clicks = { files: 'reveal', folders: 'open' }
+
+/** File types `open` would launch, run or install rather than show: never opened, only revealed
+ * (open-paths' policy: "revealed in the file manager, never launched"). An extensionless file is
+ * treated the same, as a mod cannot read the executable bit. */
+const RUNS = new Set([
+  'app', 'command', 'tool', 'terminal', 'workflow', 'action', 'scpt', 'scptd', 'applescript',
+  'sh', 'bash', 'zsh', 'fish', 'csh', 'ksh', 'py', 'pyw', 'rb', 'pl', 'php', 'ps1', 'bat', 'cmd',
+  'jar', 'pkg', 'mpkg', 'dmg', 'exe', 'msi', 'webloc', 'inetloc', 'fileloc', 'url',
+])
+
+/** Whether opening this file could run something instead of showing it. */
+function couldRun(name: string): boolean {
+  const dot = name.lastIndexOf('.')
+  return dot <= 0 || RUNS.has(name.slice(dot + 1).toLowerCase())
+}
 
 const SCHEME = 'file://'
 const WEB = ['https://', 'http://']
@@ -35,6 +51,12 @@ export function pressPlan(href: string, kindNow: Kind | undefined, clicks: Click
   const path = pathOfFileHref(href)
   if (path === undefined) return { toast: `clickable-links: ${href} is not a link this mod opens` }
   if (kindNow === undefined) return { toast: `clickable-links: ${path} no longer exists` }
-  const reveal = kindNow === 'file' ? clicks.files === 'reveal' : clicks.folders === 'reveal'
-  return { argv: reveal ? ['open', '-R', path] : ['open', path] }
+  if (kindNow === 'dir') {
+    // -a Finder: an app bundle is a folder too, and plain `open` would launch it.
+    return { argv: clicks.folders === 'reveal' ? ['open', '-R', path] : ['open', '-a', 'Finder', path] }
+  }
+  if (clicks.files === 'reveal') return { argv: ['open', '-R', path] }
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  if (couldRun(name)) return { argv: ['open', '-R', path], toast: `clickable-links: ${name} could run something, so it is shown in Finder instead` }
+  return { argv: ['open', path] }
 }

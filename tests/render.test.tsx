@@ -136,7 +136,7 @@ test('a plain click on a file reveals it in Finder; on a folder opens it', async
   await ui.press({ key: OUR_KEY, link: { href: `file://${DIR}/` } })
   expect(world.runs).toEqual([
     ['open', '-R', FILE],
-    ['open', DIR],
+    ['open', '-a', 'Finder', DIR],
   ])
 })
 
@@ -369,4 +369,26 @@ test('/clickable-links help prints the command reference without asking anything
   const { text } = await $.command.run(typed('help'))
   expect(asked.length).toBe(0)
   expect((text ?? '').includes('files reveal|open')).toBe(true)
+})
+
+test('a file link the model wrote itself is never pressable; only links the mod made from a verified path are', async ($, on) => {
+  engine(on)
+  await start($)
+  const md = await firstMd(await reply($, `Open [the app](file://${DIR}/) or see ${FILE}`))
+  expect(md.pressableLinks).toEqual([`file://${FILE}`])
+})
+
+test('a tool-row label keeps markdown characters literal', async ($, on) => {
+  engine(on, 'macos', APPLE)
+  await start($)
+  const ui = await $.ui.mount({
+    plugin: OUR_KEY,
+    component: 'ToolResult',
+    requestId: 't5',
+    props: { tool_use_id: 't5', tool: 'Bash', output: { stdout: 'see https://a.dev/foo_bar_baz', stderr: '' }, isErrored: false },
+    surface: 'terminal',
+    viewport: VIEWPORT,
+  })
+  const [md] = await markdowns(ui)
+  expect(md?.text).toBe('↗ [https://a.dev/foo\\_bar\\_baz](https://a.dev/foo_bar_baz)')
 })

@@ -10,8 +10,10 @@ test('by default a file press reveals the file in Finder', () => {
   expect(pressPlan(`file://${HOME}/a%23b/c.txt`, 'file', DEFAULT_CLICKS)).toEqual({ argv: ['open', '-R', `${HOME}/a#b/c.txt`] })
 })
 
-test('by default a folder press opens the folder in Finder', () => {
-  expect(pressPlan(`file://${HOME}/d/`, 'dir', DEFAULT_CLICKS)).toEqual({ argv: ['open', `${HOME}/d`] })
+test('by default a folder press opens the folder in Finder, never as an app', () => {
+  expect(pressPlan(`file://${HOME}/d/`, 'dir', DEFAULT_CLICKS)).toEqual({ argv: ['open', '-a', 'Finder', `${HOME}/d`] })
+  // an app bundle is a folder: Finder shows its contents instead of launching it
+  expect(pressPlan('file:///Applications/Calculator.app/', 'dir', DEFAULT_CLICKS)).toEqual({ argv: ['open', '-a', 'Finder', '/Applications/Calculator.app'] })
 })
 
 test('files open opens a file in its app; folders reveal selects the folder in its parent', () => {
@@ -43,4 +45,12 @@ test('anything but a local file:// href is no path', () => {
   expect(pathOfFileHref('https://a.dev/x')).toBeUndefined()
   expect(pathOfFileHref('file://host/share/x')).toBeUndefined()
   expect(pathOfFileHref('file://%E0%A4%A')).toBeUndefined()
+})
+
+test('files open never launches a script, app, installer or extensionless file: it reveals it instead', () => {
+  const clicks = { files: 'open', folders: 'open' } as const
+  const risky = ['run.command', 'x.sh', 'tool.py', 'Setup.pkg', 'Disk.dmg', 'a.terminal', 'Do.workflow', 'b.scpt', 'site.webloc', 'mybinary']
+  expect(risky.map(n => pressPlan(`file://${HOME}/${n}`, 'file', clicks))).toEqual(
+    risky.map(n => ({ argv: ['open', '-R', `${HOME}/${n}`], toast: `clickable-links: ${n} could run something, so it is shown in Finder instead` })),
+  )
 })
