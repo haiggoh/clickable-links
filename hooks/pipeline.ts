@@ -1,0 +1,35 @@
+// The whole of clickable-links that rewrites a reply's markdown: refs and
+// URLs, then commit SHAs, then file paths. Every stage leaves fenced code,
+// existing links and autolinks alone, so a later stage never links inside
+// what an earlier one linked. Pure: whether a path exists comes in via `look`.
+
+import type { Forge } from './forge'
+import type { Ctx, Look, Prefs } from './paths'
+import { DEFAULT_PREFS, rewrite } from './paths'
+import { linkifyRefs } from './refs'
+import { linkifyShas } from './shas'
+
+/** Past this many characters a rewritten reply is drawn as written (baselane's MAX_MARKDOWN). */
+export const MAX_MARKDOWN = 10_000
+/** The most targets a Markdown's `pressableLinks` may carry. */
+export const MAX_FILE_HREFS = 256
+
+/** path-links' defaults, with a path drawn as one link (`/clickable-links paths whole`). */
+export const DEFAULTS: Prefs = { ...DEFAULT_PREFS, mode: 'file' }
+
+// A markdown link whose target is a file:// URL, the target captured.
+// Matches "[a](file:///h/me/a)"; rejects "[b](https://b.dev)".
+// Tester: https://regex101.com/?regex=%5C%5D%5C%28%28file%3A%5C%2F%5C%2F%5B%5E%29%5Cs%5D%2B%29%5C%29&flags=g&testString=%5Ba%5D%28file%3A%2F%2F%2Fh%2Fme%2Fa%29%0A%5Bb%5D%28https%3A%2F%2Fb.dev%29
+const FILE_LINK = /\]\((file:\/\/[^)\s]+)\)/g
+
+/** The reply with every stage's links, or the reply as written when the result passes MAX_MARKDOWN. */
+export function transform(text: string, forge: Forge | undefined, ctx: Ctx, prefs: Prefs, look: Look): string {
+  const out = rewrite(linkifyShas(linkifyRefs(text, forge), forge), ctx, prefs, look)
+  return out.length > MAX_MARKDOWN ? text : out
+}
+
+/** Each file:// link target once, in order, at most MAX_FILE_HREFS. */
+export function fileHrefs(markdown: string): string[] {
+  const targets = [...markdown.matchAll(FILE_LINK)].flatMap(m => (m[1] === undefined ? [] : [m[1]]))
+  return [...new Set(targets)].slice(0, MAX_FILE_HREFS)
+}
