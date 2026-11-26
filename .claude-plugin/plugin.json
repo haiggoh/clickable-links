@@ -1,8 +1,11 @@
 {
   "name": "clickable-links",
-  "version": "0.1.0",
-  "description": "Clickable URLs, file paths (Finder), GitHub/GitLab #refs and commit SHAs in Claude Code replies and tool output",
-  "author": { "name": "Heiko Brantsch", "url": "https://github.com/haiggoh" },
+  "version": "0.1.1",
+  "description": "🖱️ Makes the links in Claude's replies and tool output clickable: web URLs open in your browser, file and folder paths in Finder, GitHub/GitLab #123 refs and commit SHAs on their pages. A plain click works even in Apple Terminal, never launches anything, and /clickable-links walks you through the settings.",
+  "author": {
+    "name": "Heiko Brantsch",
+    "url": "https://github.com/haiggoh"
+  },
   "repository": "https://github.com/haiggoh/clickable-links",
   "license": "MIT"
 }

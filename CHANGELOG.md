@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 — 2026-11-26
+
+- Marketplace description and the 🖱️ mark (README title, GitHub About) for the haiggoh catalog. No code change.
+
 ## 0.1.0 — 2026-11-26
 
 First release.

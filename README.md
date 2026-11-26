@@ -1,4 +1,4 @@
-# clickable-links
+# 🖱️ clickable-links
 
 A Claude Code mod that makes the links in Claude's replies and tool output clickable:
 
