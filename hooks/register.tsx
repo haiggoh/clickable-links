@@ -7,7 +7,7 @@
 // dad28e2 hooks/register.tsx (MIT); the tool rows are baselane-sh/mods@4522510
 // url-links and sha-links (MIT).
 
-import type { EngineInterface, PluginOptions, Register, RenderElement } from 'claude-code'
+import type { EngineInterface, PluginOptions, Register, RenderElement, RenderInput } from 'claude-code'
 
 import { forgeCache } from './forge'
 import type { Forge } from './forge'
@@ -17,13 +17,15 @@ import { probes, rootOf, walk } from './paths'
 import type { Ctx, Entry, Kind, Lister, Mode, Prefs } from './paths'
 import { DEFAULT_CLICKS, pathOfFileHref, pressPlan } from './press'
 import type { Clicks } from './press'
-import { shaRows } from './shas'
+import { shaLinks } from './shas'
 import { findUrls } from './urls'
 
 const NAME = 'clickable-links'
 /** What `/clickable-links paths <word>` sets the path mode to. */
-const PATH_WORDS: Record<string, Mode> = { whole: 'file', split: 'segments', off: 'off' }
-const WORD_OF: Record<Mode, string> = { file: 'whole', segments: 'split', off: 'off' }
+// Per-folder links (path-links' `segments`) were dropped after dogfooding: without a hover
+// underline a reader cannot tell which part of a path a click would open (user, 2026-11-26).
+const PATH_WORDS: Record<string, Mode> = { whole: 'file', off: 'off' }
+const WORD_OF: Record<Mode, string> = { file: 'whole', segments: 'whole', off: 'off' }
 /** How long a lookup is trusted: a path that exists rarely vanishes, a missing one may appear soon. */
 const HIT_MS = 60_000
 const MISS_MS = 5_000
@@ -37,8 +39,8 @@ const LIST_TIMEOUT_MS = 300
 const LIST_MS = 5_000
 /** How long `open` may take. */
 const OPEN_TIMEOUT_MS = 5_000
-/** URL rows listed under one tool result, at most; the rest are counted. */
-const MAX_URL_ROWS = 5
+/** Link rows listed under one tool row, at most; the rest are counted. */
+const MAX_ROWS = 5
 
 // Runs of whitespace between command words: splits "paths  split" in two; "split" stays one word.
 // Tester: https://regex101.com/?regex=%5Cs%2B&flags=g&testString=paths%20%20split
@@ -46,7 +48,9 @@ const WORDS = /\s+/
 /** `on`/`off` set a switch; anything else flips it. */
 const SWITCH: Record<string, boolean> = { on: true, off: false }
 
-const isMode = (v: unknown): v is Mode => v === 'file' || v === 'segments' || v === 'off'
+const isMode = (v: unknown): v is Mode => v === 'file' || v === 'off'
+/** A stored or configured mode, with an earlier version's `segments` read as whole. */
+const modeOf = (v: unknown): unknown => (v === 'segments' ? 'file' : v)
 const isBool = (v: unknown): v is boolean => typeof v === 'boolean'
 const pick = <T,>(v: unknown, ok: (v: unknown) => v is T, d: T): T => (ok(v) ? v : d)
 
@@ -54,11 +58,11 @@ const pick = <T,>(v: unknown, ok: (v: unknown) => v is T, d: T): T => (ok(v) ? v
 export function prefsOf(options: PluginOptions, stored: unknown): Prefs {
   const s = (stored && typeof stored === 'object' ? stored : {}) as Partial<Prefs>
   const base: Prefs = {
-    mode: pick(options.mode, isMode, DEFAULTS.mode),
+    mode: pick(modeOf(options.mode), isMode, DEFAULTS.mode),
     codeBlocks: pick(options.codeBlocks, isBool, DEFAULTS.codeBlocks),
     relative: pick(options.relative, isBool, DEFAULTS.relative),
   }
-  return { mode: pick(s.mode, isMode, base.mode), codeBlocks: pick(s.codeBlocks, isBool, base.codeBlocks), relative: pick(s.relative, isBool, base.relative) }
+  return { mode: pick(modeOf(s.mode), isMode, base.mode), codeBlocks: pick(s.codeBlocks, isBool, base.codeBlocks), relative: pick(s.relative, isBool, base.relative) }
 }
 
 let prefs: Prefs = DEFAULTS
@@ -177,10 +181,56 @@ async function press($: EngineInterface, href: string): Promise<void> {
   await $.process.run(plan.argv, { timeoutMs: OPEN_TIMEOUT_MS })
 }
 
+/** A markdown link whose label and target cannot break out of it. */
+const mdLink = (label: string, href: string): string =>
+  `[${label.replace(/[\\[\]]/g, c => `\\${c}`)}](${/[()\s<>]/.test(href) ? `<${href}>` : href})`
+
+/** The engine's tool row with `↗` link rows under it: native links, or in Apple Terminal (where a
+ * plain click never opens a native link) one Markdown whose links this mod opens on a plain click. */
+async function linkRows(
+  $: EngineInterface,
+  e: RenderInput<'ToolResult'> | RenderInput<'ToolUse'>,
+  row: RenderElement,
+  links: readonly { href: string; label: string }[],
+  key: string,
+): Promise<RenderElement> {
+  const { Box, Text, Link, Markdown } = $.ui.resolve(e)
+  const shown = links.slice(0, MAX_ROWS)
+  const rest = links.length - MAX_ROWS
+  const more = rest > 0 ? <Text dimColor>{`  +${rest} more`}</Text> : null
+  const ours = e.surface === 'terminal' && e.viewport?.isFullscreen !== false && (await revealable($)) && (await inAppleTerminal($))
+  if (ours) {
+    const text = shown.map(l => `↗ ${mdLink(l.label, l.href)}`).join('  \n')
+    return (
+      <Box flexDirection="column">
+        {row}
+        <Box paddingLeft={2} flexDirection="column">
+          <Markdown key={key} text={text} pressableLinks={shown.map(l => l.href)} onLinkPress={link => press($, link.href)} />
+          {more}
+        </Box>
+      </Box>
+    ) as RenderElement
+  }
+  return (
+    <Box flexDirection="column">
+      {row}
+      <Box key={key} flexDirection="column">
+        {shown.map(l => (
+          <Text key={l.href}>
+            <Text dimColor>{'  ↗ '}</Text>
+            <Link href={l.href} label={l.label} />
+          </Text>
+        ))}
+        {more}
+      </Box>
+    </Box>
+  ) as RenderElement
+}
+
 const HELP = [
   'Commands:',
   `  /${NAME}                         this report`,
-  `  /${NAME} paths whole|split|off   a path is one link · one link per folder · paths off`,
+  `  /${NAME} paths whole|off         a path is one link · paths off`,
   `  /${NAME} blocks on|off           a clickable line under code blocks that name paths`,
   `  /${NAME} relative on|off         link relative paths (resolved against the working directory)`,
   `  /${NAME} files reveal|open       a click on a file: select it in Finder · open it in its app`,
@@ -198,7 +248,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: NAME,
       description: `${NAME}: clickable URLs, paths, #refs and SHAs (/${NAME} help)`,
-      argumentHint: '[paths whole|split|off] [blocks on|off] [relative on|off] [files reveal|open] [folders open|reveal]',
+      argumentHint: '[paths whole|off] [blocks on|off] [relative on|off] [files reveal|open] [folders open|reveal]',
       immediate: true,
     })
     return next(e)
@@ -265,29 +315,12 @@ export const register: Register = (on, options) => {
   // URLs in any tool's result, listed under it (the fold may hide them).
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
     const row = await next(e)
-    let hrefs: string[]
     try {
-      hrefs = findUrls(outputTexts(e.props.output))
+      const hrefs = findUrls(outputTexts(e.props.output))
+      return hrefs.length === 0 ? row : await linkRows($, e, row, hrefs.map(href => ({ href, label: href })), `${NAME}-urls`)
     } catch {
       return row
     }
-    if (hrefs.length === 0) return row
-    const { Box, Text, Link } = $.ui.resolve(e)
-    const rest = hrefs.length - MAX_URL_ROWS
-    return (
-      <Box flexDirection="column">
-        {row}
-        <Box key={`${NAME}-urls`} flexDirection="column">
-          {hrefs.slice(0, MAX_URL_ROWS).map(href => (
-            <Text key={href}>
-              <Text dimColor>{'  ↗ '}</Text>
-              <Link href={href} />
-            </Text>
-          ))}
-          {rest > 0 ? <Text dimColor>{`  +${rest} more`}</Text> : null}
-        </Box>
-      </Box>
-    ) as RenderElement
   })
 
   // Commit SHAs a git Bash call printed, listed under its row.
@@ -295,7 +328,8 @@ export const register: Register = (on, options) => {
     const row = await next(e)
     if (e.props.tool !== 'Bash') return row
     try {
-      return shaRows(e, row, $.ui.resolve(e), await forgeOfSession($)) ?? row
+      const links = shaLinks(e, await forgeOfSession($))
+      return links.length === 0 ? row : await linkRows($, e, row, links, `${NAME}-shas`)
     } catch {
       return row
     }

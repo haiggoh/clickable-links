@@ -42,15 +42,8 @@ test('a #N inside a path or a URL fragment is no issue link, and the path is sti
   expect(links(out)).toEqual([`file://${HOME}/x/%2312/a.md`, 'https://a.dev/x#12'])
 })
 
-test('whole mode makes a path one link; split mode one link per folder and the file', () => {
-  const text = 'open ~/projects/cost-tracker/README.md now'
-  expect(links(transform(text, FORGE, CTX, DEFAULTS, look))).toEqual([`file://${README}`])
-  expect(links(transform(text, FORGE, CTX, { ...DEFAULTS, mode: 'segments' }, look))).toEqual([
-    `file://${HOME}/`,
-    `file://${WS}/`,
-    `file://${WS}/cost-tracker/`,
-    `file://${README}`,
-  ])
+test('a path is one link', () => {
+  expect(links(transform('open ~/projects/cost-tracker/README.md now', FORGE, CTX, DEFAULTS, look))).toEqual([`file://${README}`])
 })
 
 test('every stage runs once: refs, SHAs and paths in one reply', () => {

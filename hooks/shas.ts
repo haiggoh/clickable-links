@@ -3,10 +3,10 @@
 // Git commit SHAs become links to the commit page of the repository's
 // GitHub or GitLab origin: in replies, and under the row of a Bash call that
 // ran git. Display only; with no known origin everything stays plain.
-// clickable-links change: the rule wrapper (baselane's engine.ts) is gone;
-// these are plain functions the pipeline and register.tsx call.
+// clickable-links change: the rule wrapper (baselane's engine.ts) is gone, and the
+// rows are drawn by register.tsx (native links, or pressable ones in Apple Terminal).
 
-import type { ElementTable, RenderElement, RenderInput } from 'claude-code'
+import type { RenderInput } from 'claude-code'
 
 import type { Forge } from './forge'
 import { commitHref } from './forge'
@@ -31,8 +31,7 @@ const GIT_COMMAND = /(^|[\s;&|(`])git(\s|$)/
 // Matches "index 3f9e2a1..a1b2c3d 100644"; rejects "commit 3f9e2a1".
 // Tester: https://regex101.com/?regex=%5Eindex%20%5B0-9a-f%5D%2B%28%2C%5B0-9a-f%5D%2B%29%2A%5C.%5C.%5B0-9a-f%5D%2B&flags=&testString=index%203f9e2a1..a1b2c3d%20100644%0Acommit%203f9e2a1
 const BLOB_LINE = /^index [0-9a-f]+(,[0-9a-f]+)*\.\.[0-9a-f]+/
-const KEY = 'clickable-links-shas'
-const MAX_LINKS = 5
+/** Characters of a SHA shown as a row's label. */
 const LABEL = 12
 
 /** Each SHA once, in the order first written. */
@@ -47,16 +46,11 @@ export const linkifyShas = (markdown: string, forge: Forge | undefined): string 
 const commandOf = (input: unknown): string | undefined =>
   typeof input === 'object' && input !== null && 'command' in input && typeof input.command === 'string' ? input.command : undefined
 
-/** The engine's Bash row with up to five `↗ <sha>` commit links under it, or undefined to leave the row alone. */
-export const shaRows = (
-  e: RenderInput<'ToolUse'>,
-  row: RenderElement,
-  { Box, Text, Link }: ElementTable,
-  forge: Forge | undefined,
-): RenderElement | undefined => {
-  if (forge === undefined) return undefined
+/** The commit links a git Bash call's output names, each `{ href, label }`; empty without a forge. */
+export const shaLinks = (e: RenderInput<'ToolUse'>, forge: Forge | undefined): { href: string; label: string }[] => {
+  if (forge === undefined) return []
   const command = commandOf(e.props.input)
-  if (command === undefined || !GIT_COMMAND.test(command) || e.props.output === undefined) return undefined
+  if (command === undefined || !GIT_COMMAND.test(command) || e.props.output === undefined) return []
   const shas = findShas(
     outputTexts(e.props.output)
       .join('\n')
@@ -65,23 +59,8 @@ export const shaRows = (
       .filter(line => !BLOB_LINE.test(line))
       .join('\n'),
   )
-  const links = shas.flatMap(sha => {
+  return shas.flatMap(sha => {
     const href = commitHref(forge, sha)
-    return href === undefined ? [] : [{ sha, href }]
+    return href === undefined ? [] : [{ href, label: sha.slice(0, LABEL) }]
   })
-  if (links.length === 0) return undefined
-  const rest = links.length - MAX_LINKS
-  return h(
-    Box,
-    { flexDirection: 'column' },
-    row,
-    h(
-      Box,
-      { key: KEY, flexDirection: 'column' },
-      ...links
-        .slice(0, MAX_LINKS)
-        .map(({ sha, href }) => h(Text, null, h(Text, { dimColor: true }, '  ↗ '), h(Link, { href, label: sha.slice(0, LABEL) }))),
-      rest > 0 ? h(Text, { dimColor: true }, `  +${rest} more`) : null,
-    ),
-  ) as RenderElement
 }

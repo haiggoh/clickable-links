@@ -5,6 +5,8 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, FoundElement } from 'claude-code/testing'
 
+import { prefsOf } from '../hooks/register'
+
 // A neutral fake home folder: fixtures never name a real machine's paths.
 const HOME = '/h/me'
 const CWD = `${HOME}/src/shop`
@@ -16,8 +18,6 @@ const OUR_KEY = 'clickable-links'
 const COLUMNS = 120
 const ROWS = 40
 const VIEWPORT = { columns: COLUMNS, rows: ROWS }
-// h/, me/, notes/ and plan.md: the links split mode draws for the absolute FILE.
-const SPLIT_LINKS = 4
 
 type World = { files: Record<string, 'file' | 'dir'>; runs: string[][]; toasts: string[] }
 
@@ -150,15 +150,25 @@ test('a click on a file deleted since the drawing runs nothing and says so', asy
   expect(world.toasts).toEqual([`clickable-links: ${FILE} no longer exists`])
 })
 
-test('/clickable-links paths split, whole and off switch how paths are drawn', async ($, on) => {
+test('/clickable-links paths split is no longer accepted: the help is shown and paths stay whole', async ($, on) => {
   engine(on)
   await start($)
-  await $.command.run(typed('paths split'))
-  expect(((await drawOnce($, FILE)).pressableLinks as unknown[]).length).toBe(SPLIT_LINKS)
-  await $.command.run(typed('paths whole'))
+  const { text } = await $.command.run(typed('paths split'))
+  expect((text ?? '').includes('paths whole|off')).toBe(true)
   expect((await drawOnce($, FILE)).pressableLinks).toEqual([`file://${FILE}`])
+})
+
+test('a split mode stored by an earlier version is read as whole', () => {
+  expect(prefsOf({}, { mode: 'segments', codeBlocks: true, relative: true }).mode).toBe('file')
+})
+
+test('/clickable-links paths whole and off switch paths on and off', async ($, on) => {
+  engine(on)
+  await start($)
   await $.command.run(typed('paths off'))
   expect((await drawOnce($, FILE)).text).toBe(FILE)
+  await $.command.run(typed('paths whole'))
+  expect((await drawOnce($, FILE)).pressableLinks).toEqual([`file://${FILE}`])
 })
 
 test('a summary block is drawn as the engine draws it', async ($, on) => {
@@ -244,4 +254,60 @@ test('/clickable-links files open and folders reveal change what a plain click d
     ['open', FILE],
     ['open', '-R', DIR],
   ])
+})
+
+const DEPLOY = 'https://a.dev/x'
+const COMMIT = 'https://github.com/acme/web/commit/3f9e2a1'
+const resultRow = ($: Engine) =>
+  $.ui.mount({
+    plugin: OUR_KEY,
+    component: 'ToolResult',
+    requestId: 't3',
+    props: { tool_use_id: 't3', tool: 'Bash', output: { stdout: `deployed to ${DEPLOY}.`, stderr: '' }, isErrored: false },
+    surface: 'terminal',
+    viewport: VIEWPORT,
+  })
+const gitRow = ($: Engine) =>
+  $.ui.mount({
+    plugin: OUR_KEY,
+    component: 'ToolUse',
+    requestId: 't4',
+    props: {
+      tool_use_id: 't4',
+      tool: 'Bash',
+      input: { command: 'git log --oneline -1' },
+      output: { stdout: '3f9e2a1 fix things', stderr: '' },
+      isRunning: false,
+      isErrored: false,
+      isInterrupted: false,
+    },
+    surface: 'terminal',
+    viewport: VIEWPORT,
+  })
+
+test('in Apple Terminal the URL rows under a tool result open on a plain click', async ($, on) => {
+  const world = engine(on, 'macos', APPLE)
+  await start($)
+  const ui = await resultRow($)
+  const [md] = await markdowns(ui)
+  expect(md?.pressableLinks).toEqual([DEPLOY])
+  await ui.press({ key: `${OUR_KEY}-urls`, link: { href: DEPLOY } })
+  expect(world.runs).toEqual([['open', DEPLOY]])
+})
+
+test('in Apple Terminal the commit rows under a git Bash call open on a plain click', async ($, on) => {
+  const world = engine(on, 'macos', APPLE)
+  await start($)
+  const ui = await gitRow($)
+  const [md] = await markdowns(ui)
+  expect(md?.pressableLinks).toEqual([COMMIT])
+  await ui.press({ key: `${OUR_KEY}-shas`, link: { href: COMMIT } })
+  expect(world.runs).toEqual([['open', COMMIT]])
+})
+
+test('in any other terminal the tool rows stay native links', async ($, on) => {
+  engine(on, 'macos', 'ghostty')
+  await start($)
+  expect((await (await resultRow($)).findAll({ type: 'Link' })).map(l => l.props.href)).toEqual([DEPLOY])
+  expect((await (await gitRow($)).findAll({ type: 'Link' })).map(l => l.props.href)).toEqual([COMMIT])
 })
