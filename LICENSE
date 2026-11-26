@@ -35,6 +35,10 @@ Each is used under the MIT License, reproduced above, with its own copyright:
   Copyright (c) 2026 Martin Pfeffer
   Used in: hooks/paths.ts, hooks/register.tsx (path detection, safe lookup walk)
 
+- kiankhooban/open-paths (https://github.com/kiankhooban/open-paths), commit dad28e2
+  Copyright (c) 2026 Kian Khooban
+  Used in: hooks/register.tsx (the engine-like reply row, fullscreen-only click handling)
+
 - baselane-sh/mods (https://github.com/baselane-sh/mods), commit 4522510
   Copyright (c) 2026 Baselane, LLC
   Used in: hooks/forge.ts, hooks/urls.ts, hooks/marks.ts, hooks/output.ts, hooks/shas.ts

@@ -22,9 +22,14 @@ export const DEFAULTS: Prefs = { ...DEFAULT_PREFS, mode: 'file' }
 // Tester: https://regex101.com/?regex=%5C%5D%5C%28%28file%3A%5C%2F%5C%2F%5B%5E%29%5Cs%5D%2B%29%5C%29&flags=g&testString=%5Ba%5D%28file%3A%2F%2F%2Fh%2Fme%2Fa%29%0A%5Bb%5D%28https%3A%2F%2Fb.dev%29
 const FILE_LINK = /\]\((file:\/\/[^)\s]+)\)/g
 
+/** The reply after the refs and SHA stages: what the path stage scans (and the hook probes). */
+export function beforePaths(text: string, forge: Forge | undefined): string {
+  return linkifyShas(linkifyRefs(text, forge), forge)
+}
+
 /** The reply with every stage's links, or the reply as written when the result passes MAX_MARKDOWN. */
 export function transform(text: string, forge: Forge | undefined, ctx: Ctx, prefs: Prefs, look: Look): string {
-  const out = rewrite(linkifyShas(linkifyRefs(text, forge), forge), ctx, prefs, look)
+  const out = rewrite(beforePaths(text, forge), ctx, prefs, look)
   return out.length > MAX_MARKDOWN ? text : out
 }
 
