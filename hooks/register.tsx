@@ -181,9 +181,16 @@ async function press($: EngineInterface, href: string): Promise<void> {
   await $.process.run(plan.argv, { timeoutMs: OPEN_TIMEOUT_MS })
 }
 
+// The characters a markdown link label must escape: matches "[" and "]" in "a [b] c"; nothing in "plain".
+// Tester: https://regex101.com/?regex=%5B%5C%5C%5B%5C%5D%5D&flags=g&testString=a%20%5Bb%5D%20c%0Aplain
+const LABEL_SPECIAL = /[\\[\]]/g
+// A link target that needs <...>: matches "https://w.org/Foo_(bar)"; rejects "https://a.dev/x".
+// Tester: https://regex101.com/?regex=%5B%28%29%5Cs%3C%3E%5D&flags=&testString=https%3A%2F%2Fw.org%2FFoo_%28bar%29%0Ahttps%3A%2F%2Fa.dev%2Fx
+const NEEDS_BRACKETS = /[()\s<>]/
+
 /** A markdown link whose label and target cannot break out of it. */
 const mdLink = (label: string, href: string): string =>
-  `[${label.replace(/[\\[\]]/g, c => `\\${c}`)}](${/[()\s<>]/.test(href) ? `<${href}>` : href})`
+  `[${label.replace(LABEL_SPECIAL, c => `\\${c}`)}](${NEEDS_BRACKETS.test(href) ? `<${href}>` : href})`
 
 /** The engine's tool row with `↗` link rows under it: native links, or in Apple Terminal (where a
  * plain click never opens a native link) one Markdown whose links this mod opens on a plain click. */
@@ -227,9 +234,59 @@ async function linkRows(
   ) as RenderElement
 }
 
+async function savePrefs($: EngineInterface, p: Prefs): Promise<void> {
+  prefs = p
+  await $.store.set('prefs', p).catch(() => undefined)
+  $.ui.invalidate('ui.render')
+}
+
+async function saveClicks($: EngineInterface, c: Clicks): Promise<void> {
+  clicks = c
+  await $.store.set('clicks', c).catch(() => undefined)
+}
+
+/** Labels of the walkthrough's dialogs: one constant each, compared exactly with the answer. */
+const MENU = { files: 'File clicks', folders: 'Folder clicks', paths: 'Path links', done: 'Done' } as const
+const FILE_CHOICES = { reveal: 'Reveal in Finder', open: 'Open in its app' } as const
+const FOLDER_CHOICES = { open: 'Open the folder', reveal: 'Reveal in its parent folder' } as const
+const PATH_CHOICES = { on: 'On', off: 'Off', blocks: 'Code-block line on/off', relative: 'Relative paths on/off' } as const
+/** Menu rounds one walkthrough may take, so an answer the dialog never gives cannot loop forever. */
+const MAX_ROUNDS = 12
+
+/** `/clickable-links` with no arguments: the settings, one AskUserQuestion dialog at a time.
+ * Each change returns to the menu; Done, a dismissal or MAX_ROUNDS ends it. */
+async function walkthrough($: EngineInterface, round = 0): Promise<void> {
+  if (round >= MAX_ROUNDS) return
+  const pick = await $.ui
+    .ask(`What would you like to change? (now: ${status(prefs, clicks).slice(STATUS_PREFIX.length)})`, {
+      header: 'Settings',
+      options: [MENU.files, MENU.folders, MENU.paths, MENU.done],
+    })
+    .catch(() => MENU.done)
+  if (pick === MENU.files) {
+    const a = await $.ui.ask('What should a click on a file do?', { header: 'Files', options: [FILE_CHOICES.reveal, FILE_CHOICES.open] }).catch(() => '')
+    if (a === FILE_CHOICES.reveal || a === FILE_CHOICES.open) await saveClicks($, { ...clicks, files: a === FILE_CHOICES.open ? 'open' : 'reveal' })
+  } else if (pick === MENU.folders) {
+    const a = await $.ui.ask('What should a click on a folder do?', { header: 'Folders', options: [FOLDER_CHOICES.open, FOLDER_CHOICES.reveal] }).catch(() => '')
+    if (a === FOLDER_CHOICES.open || a === FOLDER_CHOICES.reveal) await saveClicks($, { ...clicks, folders: a === FOLDER_CHOICES.reveal ? 'reveal' : 'open' })
+  } else if (pick === MENU.paths) {
+    const a = await $.ui
+      .ask('How should file paths in replies be linked?', { header: 'Paths', options: [PATH_CHOICES.on, PATH_CHOICES.off, PATH_CHOICES.blocks, PATH_CHOICES.relative] })
+      .catch(() => '')
+    if (a === PATH_CHOICES.on) await savePrefs($, { ...prefs, mode: 'file' })
+    if (a === PATH_CHOICES.off) await savePrefs($, { ...prefs, mode: 'off' })
+    if (a === PATH_CHOICES.blocks) await savePrefs($, { ...prefs, codeBlocks: !prefs.codeBlocks })
+    if (a === PATH_CHOICES.relative) await savePrefs($, { ...prefs, relative: !prefs.relative })
+  } else {
+    return
+  }
+  return walkthrough($, round + 1)
+}
+
 const HELP = [
   'Commands:',
-  `  /${NAME}                         this report`,
+  `  /${NAME}                         walk through the settings (one dialog at a time)`,
+  `  /${NAME} help                    this reference`,
   `  /${NAME} paths whole|off         a path is one link · paths off`,
   `  /${NAME} blocks on|off           a clickable line under code blocks that name paths`,
   `  /${NAME} relative on|off         link relative paths (resolved against the working directory)`,
@@ -238,8 +295,11 @@ const HELP = [
   'In Apple Terminal a plain click also opens web links (Cmd+click never reaches Claude Code there).',
 ]
 
+/** What every status line starts with; the walkthrough's menu shows the rest. */
+const STATUS_PREFIX = `${NAME}: `
+
 const status = (p: Prefs, c: Clicks) =>
-  `${NAME}: paths ${WORD_OF[p.mode]} · code blocks ${p.codeBlocks ? 'on' : 'off'} · relative ${p.relative ? 'on' : 'off'} · files ${c.files} · folders ${c.folders}`
+  `${STATUS_PREFIX}paths ${WORD_OF[p.mode]} · code blocks ${p.codeBlocks ? 'on' : 'off'} · relative ${p.relative ? 'on' : 'off'} · files ${c.files} · folders ${c.folders}`
 
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
@@ -256,15 +316,16 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: NAME }, async ($, e) => {
     const [cmd = '', arg = ''] = e.args.trim().toLowerCase().split(WORDS)
+    if (cmd === '') {
+      await walkthrough($)
+      return { text: status(prefs, clicks) }
+    }
     const save = async (p: Prefs) => {
-      prefs = p
-      await $.store.set('prefs', p).catch(() => undefined)
-      $.ui.invalidate('ui.render')
+      await savePrefs($, p)
       return { text: status(p, clicks) }
     }
-    const saveClicks = async (c: Clicks) => {
-      clicks = c
-      await $.store.set('clicks', c).catch(() => undefined)
+    const setClicks = async (c: Clicks) => {
+      await saveClicks($, c)
       return { text: status(prefs, c) }
     }
     const flag = (v: boolean) => SWITCH[arg] ?? !v
@@ -272,8 +333,8 @@ export const register: Register = (on, options) => {
     if (cmd === 'paths' && mode !== undefined) return save({ ...prefs, mode })
     if (cmd === 'blocks') return save({ ...prefs, codeBlocks: flag(prefs.codeBlocks) })
     if (cmd === 'relative') return save({ ...prefs, relative: flag(prefs.relative) })
-    if (cmd === 'files' && FILE_WORDS.includes(arg)) return saveClicks({ ...clicks, files: arg === 'open' ? 'open' : 'reveal' })
-    if (cmd === 'folders' && FOLDER_WORDS.includes(arg)) return saveClicks({ ...clicks, folders: arg === 'reveal' ? 'reveal' : 'open' })
+    if (cmd === 'files' && FILE_WORDS.includes(arg)) return setClicks({ ...clicks, files: arg === 'open' ? 'open' : 'reveal' })
+    if (cmd === 'folders' && FOLDER_WORDS.includes(arg)) return setClicks({ ...clicks, folders: arg === 'reveal' ? 'reveal' : 'open' })
     return { text: [status(prefs, clicks), '', ...HELP].join('\n') }
   })
 

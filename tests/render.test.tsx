@@ -311,3 +311,62 @@ test('in any other terminal the tool rows stay native links', async ($, on) => {
   expect((await (await resultRow($)).findAll({ type: 'Link' })).map(l => l.props.href)).toEqual([DEPLOY])
   expect((await (await gitRow($)).findAll({ type: 'Link' })).map(l => l.props.href)).toEqual([COMMIT])
 })
+
+/** Answers the next `$.ui.ask` dialogs with these labels, in order; records each question asked. */
+function answers(on: On, labels: string[]): string[] {
+  const asked: string[] = []
+  const queue = [...labels]
+  on('tool.call', { tool: 'AskUserQuestion' }, (_$, e) => {
+    const questions = e.questions
+    const q = questions[0]?.question ?? ''
+    asked.push(q)
+    const label = queue.shift()
+    if (label === undefined) return { deny: 'dismissed' }
+    return { result: { questions, answers: { [q]: label } } } as never
+  })
+  return asked
+}
+
+// menu → File clicks → its choice → menu → Folder clicks → its choice → menu → Done: five dialogs.
+const WALK_DIALOGS = 5
+
+test('plain /clickable-links walks through the options and saves what is picked', async ($, on) => {
+  const world = engine(on)
+  const asked = answers(on, ['File clicks', 'Open in its app', 'Folder clicks', 'Reveal in its parent folder', 'Done'])
+  await start($)
+  const { text } = await $.command.run(typed(''))
+  expect(asked.length).toBe(WALK_DIALOGS)
+  expect((text ?? '').includes('files open · folders reveal')).toBe(true)
+  const ui = await reply($, `See ${FILE} in ${DIR}`)
+  await ui.press({ key: OUR_KEY, link: { href: `file://${FILE}` } })
+  await ui.press({ key: OUR_KEY, link: { href: `file://${DIR}/` } })
+  expect(world.runs).toEqual([
+    ['open', FILE],
+    ['open', '-R', DIR],
+  ])
+})
+
+test('the walkthrough can turn path links off', async ($, on) => {
+  engine(on)
+  answers(on, ['Path links', 'Off', 'Done'])
+  await start($)
+  await $.command.run(typed(''))
+  expect((await drawOnce($, FILE)).text).toBe(FILE)
+})
+
+test('dismissing the walkthrough changes nothing and still reports the settings', async ($, on) => {
+  engine(on)
+  answers(on, [])
+  await start($)
+  const { text } = await $.command.run(typed(''))
+  expect((text ?? '').includes('paths whole · code blocks on · relative on · files reveal · folders open')).toBe(true)
+})
+
+test('/clickable-links help prints the command reference without asking anything', async ($, on) => {
+  engine(on)
+  const asked = answers(on, ['Done'])
+  await start($)
+  const { text } = await $.command.run(typed('help'))
+  expect(asked.length).toBe(0)
+  expect((text ?? '').includes('files reveal|open')).toBe(true)
+})
