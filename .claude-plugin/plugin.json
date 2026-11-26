@@ -1,0 +1,8 @@
+{
+  "name": "clickable-links",
+  "version": "0.1.0",
+  "description": "Clickable URLs, file paths (Finder), GitHub/GitLab #refs and commit SHAs in Claude Code replies and tool output",
+  "author": { "name": "Heiko Brantsch", "url": "https://github.com/haiggoh" },
+  "repository": "https://github.com/haiggoh/clickable-links",
+  "license": "MIT"
+}
