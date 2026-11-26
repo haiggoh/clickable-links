@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { forgeOf } from '../hooks/forge'
 import type { Ctx, Kind } from '../hooks/paths'
-import { DEFAULTS, MAX_FILE_HREFS, MAX_MARKDOWN, fileHrefs, transform } from '../hooks/pipeline'
+import { DEFAULTS, MAX_FILE_HREFS, MAX_MARKDOWN, fileHrefs, transform, webHrefs } from '../hooks/pipeline'
 
 // A neutral fake home folder: fixtures never name a real machine's paths.
 const HOME = '/h/me'
@@ -76,4 +76,9 @@ test('fileHrefs lists each file:// target once and no https target', () => {
 test('fileHrefs keeps at most as many targets as pressableLinks may carry', () => {
   const md = Array.from({ length: TOO_MANY }, (_, i) => `[f](file://${HOME}/f${i})`).join(' ')
   expect(fileHrefs(md).length).toBe(MAX_FILE_HREFS)
+})
+
+test('webHrefs lists each http(s) target once, unwrapping <...> targets with parentheses, no file: target', () => {
+  const md = transform('see #4, https://en.wikipedia.org/wiki/Foo_(bar) and #4 again', FORGE, CTX, DEFAULTS, look)
+  expect(webHrefs(`${md} [f](file://${HOME}/a)`)).toEqual(['https://github.com/acme/web/issues/4', 'https://en.wikipedia.org/wiki/Foo_(bar)'])
 })

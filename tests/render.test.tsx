@@ -35,7 +35,7 @@ function children(world: World, dir: string) {
 }
 
 /** The engine beneath the plugin: draws a reply as a Markdown keyed ENGINE_KEY. */
-function engine(on: On, platform: 'macos' | 'linux' = 'macos'): World {
+function engine(on: On, platform: 'macos' | 'linux' = 'macos', terminal: string | undefined = undefined): World {
   const world: World = { files: { [FILE]: 'file', [DIR]: 'dir' }, runs: [], toasts: [] }
   mock.clock(on)
   mock.store(on)
@@ -47,7 +47,7 @@ function engine(on: On, platform: 'macos' | 'linux' = 'macos'): World {
   on('session.cwd', () => ({ value: CWD }))
   on('session.info', () => ({ value: { transcriptPath: `${HOME}/t.jsonl`, sysname: platform === 'macos' ? 'Darwin' : 'Linux', platform, isHosted: false } }))
   on('session.repo', () => ({ value: { root: CWD, remote: 'git@github.com:acme/web.git', internal: false, name: null } }))
-  on('env.get', (_$, e) => ({ value: e.name === 'HOME' ? HOME : undefined }))
+  on('env.get', (_$, e) => ({ value: ({ HOME, TERM_PROGRAM: terminal } as Record<string, string | undefined>)[e.name] }))
   on('command.register', (_$, e) => ({ value: { command: e.name } }))
   on('fs.stat', (_$, e) => ({ value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: e.path } }))
   on('fs.list', (_$, e) => ({ value: children(world, e.path) }))
@@ -201,4 +201,47 @@ test('SHAs printed by a git Bash call are listed as commit links under its row',
     surface: 'terminal',
   })
   expect((await ui.findAll({ type: 'Link' })).map(l => l.props.href)).toEqual(['https://github.com/acme/web/commit/3f9e2a1'])
+})
+
+// Apple Terminal forwards Cmd+click as a plain click and Claude Code opens no link on a plain
+// click there, so web links are ours to answer in that terminal (as Claude Code does for Ghostty).
+const APPLE = 'Apple_Terminal'
+const ISSUE = 'https://github.com/acme/web/issues/9'
+
+test('in Apple Terminal a reply with only web links is our own row and its web links are pressable', async ($, on) => {
+  engine(on, 'macos', APPLE)
+  await start($)
+  const md = await firstMd(await reply($, 'Closed by #9'))
+  expect(md.key).toBe(OUR_KEY)
+  expect(md.pressableLinks).toEqual([ISSUE])
+})
+
+test('in Apple Terminal a plain click on a web link opens it in the browser', async ($, on) => {
+  const world = engine(on, 'macos', APPLE)
+  await start($)
+  const ui = await reply($, 'Closed by #9')
+  await ui.press({ key: OUR_KEY, link: { href: ISSUE } })
+  expect(world.runs).toEqual([['open', ISSUE]])
+})
+
+test('in any other terminal web links stay the engine\'s, even beside a file link', async ($, on) => {
+  engine(on, 'macos', 'ghostty')
+  await start($)
+  const md = await firstMd(await reply($, `See ${FILE}, closed by #9`))
+  expect(md.key).toBe(OUR_KEY)
+  expect(md.pressableLinks).toEqual([`file://${FILE}`])
+})
+
+test('/clickable-links files open and folders reveal change what a plain click does', async ($, on) => {
+  const world = engine(on)
+  await start($)
+  await $.command.run(typed('files open'))
+  await $.command.run(typed('folders reveal'))
+  const ui = await reply($, `See ${FILE} in ${DIR}`)
+  await ui.press({ key: OUR_KEY, link: { href: `file://${FILE}` } })
+  await ui.press({ key: OUR_KEY, link: { href: `file://${DIR}/` } })
+  expect(world.runs).toEqual([
+    ['open', FILE],
+    ['open', '-R', DIR],
+  ])
 })

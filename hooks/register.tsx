@@ -12,10 +12,11 @@ import type { EngineInterface, PluginOptions, Register, RenderElement } from 'cl
 import { forgeCache } from './forge'
 import type { Forge } from './forge'
 import { outputTexts } from './output'
-import { DEFAULTS, beforePaths, fileHrefs, transform } from './pipeline'
+import { DEFAULTS, MAX_FILE_HREFS, beforePaths, fileHrefs, transform, webHrefs } from './pipeline'
 import { probes, rootOf, walk } from './paths'
 import type { Ctx, Entry, Kind, Lister, Mode, Prefs } from './paths'
-import { pathOfFileHref, pressPlan } from './press'
+import { DEFAULT_CLICKS, pathOfFileHref, pressPlan } from './press'
+import type { Clicks } from './press'
 import { shaRows } from './shas'
 import { findUrls } from './urls'
 
@@ -63,6 +64,23 @@ export function prefsOf(options: PluginOptions, stored: unknown): Prefs {
 let prefs: Prefs = DEFAULTS
 let home: string | undefined
 let canReveal: boolean | undefined
+let clicks: Clicks = DEFAULT_CLICKS
+let appleTerminal: boolean | undefined
+/** What `/clickable-links files|folders <word>` may set. */
+const FILE_WORDS: readonly string[] = ['reveal', 'open']
+const FOLDER_WORDS: readonly string[] = ['open', 'reveal']
+/** Apple Terminal forwards Cmd+click as a plain click and Claude Code opens no link on a plain click
+ * there (it does for Ghostty and Warp), so in Apple Terminal web links are this mod's to open. */
+const APPLE_TERMINAL = 'Apple_Terminal'
+
+/** The stored click actions, each checked; anything unknown falls back to the default. */
+export function clicksOf(stored: unknown): Clicks {
+  const s = (stored && typeof stored === 'object' ? stored : {}) as Partial<Clicks>
+  return {
+    files: s.files === 'open' ? 'open' : DEFAULT_CLICKS.files,
+    folders: s.folders === 'reveal' ? 'reveal' : DEFAULT_CLICKS.folders,
+  }
+}
 const forgeFor = forgeCache()
 const cache = new Map<string, { kind: Kind | null; at: number }>()
 const listings = new Map<string, { entries: readonly Entry[] | undefined; at: number }>()
@@ -143,12 +161,18 @@ async function revealable($: EngineInterface): Promise<boolean> {
   return canReveal
 }
 
-/** A plain click on a file:// link: reveal a file or open a folder in Finder, after a fresh lookup. */
+/** Whether this engine runs in Apple Terminal, read once. */
+async function inAppleTerminal($: EngineInterface): Promise<boolean> {
+  if (appleTerminal === undefined) appleTerminal = (await $.env.get('TERM_PROGRAM').catch(() => undefined)) === APPLE_TERMINAL
+  return appleTerminal
+}
+
+/** A plain click on a link our row answers: a file:// link after a fresh lookup, a web link as is. */
 async function press($: EngineInterface, href: string): Promise<void> {
   const path = pathOfFileHref(href)
   const ctx = await ctxOf($)
   const kindNow = path === undefined ? undefined : ((await kindOf($, path, ctx, await $.clock.now(), true)) ?? undefined)
-  const plan = pressPlan(href, kindNow)
+  const plan = pressPlan(href, kindNow, clicks)
   if ('toast' in plan) return $.ui.toast(plan.toast)
   await $.process.run(plan.argv, { timeoutMs: OPEN_TIMEOUT_MS })
 }
@@ -159,18 +183,22 @@ const HELP = [
   `  /${NAME} paths whole|split|off   a path is one link · one link per folder · paths off`,
   `  /${NAME} blocks on|off           a clickable line under code blocks that name paths`,
   `  /${NAME} relative on|off         link relative paths (resolved against the working directory)`,
-  'A plain click on a file reveals it in Finder, on a folder opens it; Cmd/Ctrl-click opens the file.',
+  `  /${NAME} files reveal|open       a click on a file: select it in Finder · open it in its app`,
+  `  /${NAME} folders open|reveal     a click on a folder: open it in Finder · select it in its parent`,
+  'In Apple Terminal a plain click also opens web links (Cmd+click never reaches Claude Code there).',
 ]
 
-const status = (p: Prefs) => `${NAME}: paths ${WORD_OF[p.mode]} · code blocks ${p.codeBlocks ? 'on' : 'off'} · relative ${p.relative ? 'on' : 'off'}`
+const status = (p: Prefs, c: Clicks) =>
+  `${NAME}: paths ${WORD_OF[p.mode]} · code blocks ${p.codeBlocks ? 'on' : 'off'} · relative ${p.relative ? 'on' : 'off'} · files ${c.files} · folders ${c.folders}`
 
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     prefs = prefsOf(options, await $.store.get('prefs').catch(() => undefined))
+    clicks = clicksOf(await $.store.get('clicks').catch(() => undefined))
     await $.command.register({
       name: NAME,
       description: `${NAME}: clickable URLs, paths, #refs and SHAs (/${NAME} help)`,
-      argumentHint: '[paths whole|split|off] [blocks on|off] [relative on|off]',
+      argumentHint: '[paths whole|split|off] [blocks on|off] [relative on|off] [files reveal|open] [folders open|reveal]',
       immediate: true,
     })
     return next(e)
@@ -182,14 +210,21 @@ export const register: Register = (on, options) => {
       prefs = p
       await $.store.set('prefs', p).catch(() => undefined)
       $.ui.invalidate('ui.render')
-      return { text: status(p) }
+      return { text: status(p, clicks) }
+    }
+    const saveClicks = async (c: Clicks) => {
+      clicks = c
+      await $.store.set('clicks', c).catch(() => undefined)
+      return { text: status(prefs, c) }
     }
     const flag = (v: boolean) => SWITCH[arg] ?? !v
     const mode = PATH_WORDS[arg]
     if (cmd === 'paths' && mode !== undefined) return save({ ...prefs, mode })
     if (cmd === 'blocks') return save({ ...prefs, codeBlocks: flag(prefs.codeBlocks) })
     if (cmd === 'relative') return save({ ...prefs, relative: flag(prefs.relative) })
-    return { text: [status(prefs), '', ...HELP].join('\n') }
+    if (cmd === 'files' && FILE_WORDS.includes(arg)) return saveClicks({ ...clicks, files: arg === 'open' ? 'open' : 'reveal' })
+    if (cmd === 'folders' && FOLDER_WORDS.includes(arg)) return saveClicks({ ...clicks, folders: arg === 'reveal' ? 'reveal' : 'open' })
+    return { text: [status(prefs, clicks), '', ...HELP].join('\n') }
   })
 
   // The stored reply stays as written; only its drawing carries the links.
@@ -198,19 +233,21 @@ export const register: Register = (on, options) => {
     const text = e.props.text
     let out = text
     let own = false
+    let hrefs: string[] = []
     try {
       const forge = await forgeOfSession($)
       const ctx = await ctxOf($)
       if (prefs.mode !== 'off') await lookUp($, probes(beforePaths(text, forge), ctx, prefs), await $.clock.now(), ctx)
       out = transform(text, forge, ctx, prefs, abs => cache.get(abs)?.kind ?? undefined)
       // Only the fullscreen terminal reports plain clicks; elsewhere the surface follows file:// itself.
-      own = e.surface === 'terminal' && e.viewport?.isFullscreen !== false && fileHrefs(out).length > 0 && (await revealable($))
+      const ours = e.surface === 'terminal' && e.viewport?.isFullscreen !== false && (await revealable($))
+      hrefs = ours ? [...fileHrefs(out), ...((await inAppleTerminal($)) ? webHrefs(out) : [])].slice(0, MAX_FILE_HREFS) : []
+      own = hrefs.length > 0
     } catch {
       return next(e) // never in the way of a reply
     }
     if (out === text) return next(e)
     if (!own) return next({ ...e, props: { ...e.props, text: out } })
-    const hrefs = fileHrefs(out)
     const { Box, Text, Markdown } = $.ui.resolve(e)
     // The engine's own reply row: a blank line above and a "● " gutter on a reply's first block.
     return (
