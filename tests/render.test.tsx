@@ -136,7 +136,7 @@ test('a plain click on a file reveals it in Finder; on a folder opens it', async
   await ui.press({ key: OUR_KEY, link: { href: `file://${DIR}/` } })
   expect(world.runs).toEqual([
     ['open', '-R', FILE],
-    ['open', '-a', 'Finder', DIR],
+    ['open', DIR],
   ])
 })
 

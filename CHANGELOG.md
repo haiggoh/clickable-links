@@ -12,7 +12,7 @@ First release.
   Apple Terminal never passes through).
 - `/clickable-links` walks through the settings in AskUserQuestion dialogs; typed shortcuts and `/clickable-links help`.
 - Paths are looked up by walking down from trusted local roots only, never stat-ed from reply text; clicks run `open`
-  with argument lists after a fresh lookup, never launch anything (folders via Finder, scripts/apps/installers only
-  revealed), and only on links the mod itself created from a verified path.
+  with argument lists after a fresh lookup, never launch anything (scripts, apps, installers and folders with an
+  extension, which may be bundles, are only revealed), and only on links the mod itself created from a verified path.
 - Built from babarot/claude-linkify, pepperonas/path-links, kiankhooban/open-paths and baselane-sh/mods (MIT); see
   README › Credits.

@@ -51,12 +51,15 @@ export function pressPlan(href: string, kindNow: Kind | undefined, clicks: Click
   const path = pathOfFileHref(href)
   if (path === undefined) return { toast: `clickable-links: ${href} is not a link this mod opens` }
   if (kindNow === undefined) return { toast: `clickable-links: ${path} no longer exists` }
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  const revealOnly = { argv: ['open', '-R', path], toast: `clickable-links: ${name} could run something, so it is shown in Finder instead` }
   if (kindNow === 'dir') {
-    // -a Finder: an app bundle is a folder too, and plain `open` would launch it.
-    return { argv: clicks.folders === 'reveal' ? ['open', '-R', path] : ['open', '-a', 'Finder', path] }
+    if (clicks.folders === 'reveal') return { argv: ['open', '-R', path] }
+    // A folder with an extension may be a bundle (Foo.app, Bar.xcodeproj, Doc.rtfd) that `open` would
+    // launch — measured 2026-11-26: `open` and `open -a Finder` both launch Calculator.app, `open -R`
+    // does not — and a mod cannot tell a bundle from a folder, so such a folder is only revealed.
+    return name.lastIndexOf('.') > 0 ? revealOnly : { argv: ['open', path] }
   }
   if (clicks.files === 'reveal') return { argv: ['open', '-R', path] }
-  const name = path.slice(path.lastIndexOf('/') + 1)
-  if (couldRun(name)) return { argv: ['open', '-R', path], toast: `clickable-links: ${name} could run something, so it is shown in Finder instead` }
-  return { argv: ['open', path] }
+  return couldRun(name) ? revealOnly : { argv: ['open', path] }
 }

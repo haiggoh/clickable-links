@@ -10,10 +10,16 @@ test('by default a file press reveals the file in Finder', () => {
   expect(pressPlan(`file://${HOME}/a%23b/c.txt`, 'file', DEFAULT_CLICKS)).toEqual({ argv: ['open', '-R', `${HOME}/a#b/c.txt`] })
 })
 
-test('by default a folder press opens the folder in Finder, never as an app', () => {
-  expect(pressPlan(`file://${HOME}/d/`, 'dir', DEFAULT_CLICKS)).toEqual({ argv: ['open', '-a', 'Finder', `${HOME}/d`] })
-  // an app bundle is a folder: Finder shows its contents instead of launching it
-  expect(pressPlan('file:///Applications/Calculator.app/', 'dir', DEFAULT_CLICKS)).toEqual({ argv: ['open', '-a', 'Finder', '/Applications/Calculator.app'] })
+test('by default a folder press opens the folder in Finder', () => {
+  expect(pressPlan(`file://${HOME}/d/`, 'dir', DEFAULT_CLICKS)).toEqual({ argv: ['open', `${HOME}/d`] })
+})
+
+test('a folder with an extension may be a bundle that open would launch: it is only revealed', () => {
+  // measured 2026-11-26: `open` and `open -a Finder` both LAUNCH Calculator.app; `open -R` does not
+  const bundles = ['/Applications/Calculator.app', `${HOME}/Proj.xcodeproj`, `${HOME}/Notes.rtfd`]
+  expect(bundles.map(b => pressPlan(`file://${b}/`, 'dir', DEFAULT_CLICKS))).toEqual(
+    bundles.map(b => ({ argv: ['open', '-R', b], toast: `clickable-links: ${b.slice(b.lastIndexOf('/') + 1)} could run something, so it is shown in Finder instead` })),
+  )
 })
 
 test('files open opens a file in its app; folders reveal selects the folder in its parent', () => {
