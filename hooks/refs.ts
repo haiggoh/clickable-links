@@ -1,6 +1,13 @@
 // Adapted from babarot/claude-linkify@99f52f2 hooks/linkify.ts (MIT)
-// Turns bare URLs and GitHub references in markdown into markdown links,
-// leaving code (fenced blocks, inline spans) and existing links alone.
+// Turns bare URLs and GitHub/GitLab references in markdown into markdown
+// links, leaving code (fenced blocks, inline spans) and existing links alone.
+//
+// clickable-links changes: the session repository is a `Forge` (GitHub or
+// GitLab, from baselane's forge.ts) instead of a GitHub `owner/repo` string;
+// MR#123 is a merge/pull request; every href passes baselane's `linkable`.
+
+import type { Forge } from './forge'
+import { linkable } from './urls'
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})/
 
@@ -20,6 +27,7 @@ const TOKEN =
 const KINDS: Record<string, 'pull' | 'issues'> = {
   pr: 'pull',
   pull: 'pull',
+  mr: 'pull',
   issue: 'issues',
   issues: 'issues',
 }
@@ -34,7 +42,6 @@ const NOT_REPOS = new Set([
   'id',
   'item',
   'line',
-  'mr',
   'no',
   'number',
   'option',
@@ -55,16 +62,6 @@ const NOT_REPOS = new Set([
 export type LinkifyOptions = {
   /** name#123 links to the repository `name` of the session repository's owner. */
   repoRefs: boolean
-}
-
-/** The `owner/repo` of a github.com remote URL, or null for any other host. */
-export function parseGitHubRepo(remote: string | null | undefined): string | null {
-  if (!remote) return null
-  const match =
-    /^(?:[a-z+]+:\/\/)?(?:[^@/]+@)?github\.com[:/](?::\d+\/)?([A-Za-z0-9][A-Za-z0-9-]*)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(
-      remote.trim(),
-    )
-  return match ? `${match[1]}/${match[2]}` : null
 }
 
 /** A URL without the punctuation that ends the sentence around it. */
@@ -93,27 +90,36 @@ function link(text: string, href: string): string {
   return `[${label}](${dest})`
 }
 
+/** The page of issue or pull request `num` in `path` on `forge`'s host. */
+function pageOf(forge: Forge, path: string, kind: 'pull' | 'issues', num: string): string | null {
+  const gitlab = forge.host === 'gitlab.com'
+  const section = gitlab ? (kind === 'pull' ? '-/merge_requests' : '-/issues') : kind
+  return linkable(`https://${forge.host}/${path}/${section}/${num}`) ?? null
+}
+
 /** Where a reference points, or null when it stays text. */
 function resolveRef(
   qualified: string | undefined,
   name: string | undefined,
   num: string,
-  repo: string | null,
+  forge: Forge | undefined,
   options: LinkifyOptions,
 ): string | null {
+  // owner/repo#123 names a GitHub repository wherever the session is.
   // /issues/<n> redirects to the pull request when the number is one.
-  if (qualified !== undefined) return `https://github.com/${qualified}/issues/${num}`
-  if (repo === null) return null
-  if (name === undefined) return `https://github.com/${repo}/issues/${num}`
+  if (qualified !== undefined) return linkable(`https://github.com/${qualified}/issues/${num}`) ?? null
+  if (forge === undefined) return null
+  if (name === undefined) return pageOf(forge, forge.path, 'issues', num)
   const lower = name.toLowerCase()
   const kind = KINDS[lower]
-  if (kind !== undefined) return `https://github.com/${repo}/${kind}/${num}`
+  if (kind !== undefined) return pageOf(forge, forge.path, kind, num)
   if (!options.repoRefs || NOT_REPOS.has(lower) || /^\d+$/.test(name)) return null
-  const owner = repo.slice(0, repo.indexOf('/'))
-  return `https://github.com/${owner}/${name}/issues/${num}`
+  // A sibling repository: same owner (GitHub) or same group (GitLab).
+  const parent = forge.path.slice(0, forge.path.lastIndexOf('/'))
+  return pageOf(forge, `${parent}/${name}`, 'issues', num)
 }
 
-function linkifyPlain(text: string, repo: string | null, options: LinkifyOptions): string {
+function linkifyPlain(text: string, forge: Forge | undefined, options: LinkifyOptions): string {
   return text.replace(
     TOKEN,
     (
@@ -128,29 +134,29 @@ function linkifyPlain(text: string, repo: string | null, options: LinkifyOptions
         const trimmed = trimUrl(url)
         return link(trimmed, trimmed) + url.slice(trimmed.length)
       }
-      const href = resolveRef(qualified, name, num, repo, options)
+      const href = resolveRef(qualified, name, num, forge, options)
       if (href === null) return whole
       return before + link(`${qualified ?? name ?? ''}#${num}`, href)
     },
   )
 }
 
-function linkifyLine(line: string, repo: string | null, options: LinkifyOptions): string {
+function linkifyLine(line: string, forge: Forge | undefined, options: LinkifyOptions): string {
   let out = ''
   let last = 0
   for (const match of line.matchAll(PROTECTED)) {
-    out += linkifyPlain(line.slice(last, match.index), repo, options) + match[0]
+    out += linkifyPlain(line.slice(last, match.index), forge, options) + match[0]
     last = match.index + match[0].length
   }
-  return out + linkifyPlain(line.slice(last), repo, options)
+  return out + linkifyPlain(line.slice(last), forge, options)
 }
 
 /**
- * The markdown with bare URLs and issue references made links. `repo` is
- * the session's `owner/repo`, which #123, PR#123 and name#123 point into;
- * null leaves them as text.
+ * The markdown with bare URLs and issue references made links. `forge` is
+ * the session repository, which #123, PR#123 and name#123 point into;
+ * undefined leaves them as text.
  */
-export function linkify(markdown: string, repo: string | null, options: LinkifyOptions = { repoRefs: true }): string {
+export function linkifyRefs(markdown: string, forge: Forge | undefined, options: LinkifyOptions = { repoRefs: true }): string {
   if (!markdown.includes('http') && !markdown.includes('#')) return markdown
   let fence: string | null = null
   return markdown
@@ -168,7 +174,7 @@ export function linkify(markdown: string, repo: string | null, options: LinkifyO
       }
       // Indented code blocks are not told apart from nested list items,
       // which replies use far more; both are linkified.
-      return linkifyLine(line, repo, options)
+      return linkifyLine(line, forge, options)
     })
     .join('\n')
 }
