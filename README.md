@@ -79,7 +79,7 @@ Settings are kept across sessions.
 ## Known limits
 
 - **No hover underline on file and folder links.** Claude Code draws a hover underline on web links, not on `file://`
-  links, and a mod cannot style a link's hover. Requested upstream (see `docs/upstream-feature-request.md`).
+  links, and a mod cannot style a link's hover. Requested upstream: [anthropics/claude-code#112677](https://github.com/anthropics/claude-code/issues/112677).
 - **No modifier click.** "Plain click reveals, Cmd-click opens" is not possible: a mod never sees which modifier was
   held, and in Apple Terminal Cmd never reaches Claude Code at all. The `files` and `folders` settings choose the plain
   click's action instead.

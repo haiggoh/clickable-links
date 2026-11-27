@@ -1,4 +1,4 @@
-# DRAFT — not posted. Post only after the user says "post it".
+# Posted 2026-11-27 as anthropics/claude-code#112677 — https://github.com/anthropics/claude-code/issues/112677
 
 Target: anthropics/claude-code issues. Title:
 
