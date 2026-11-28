@@ -11,7 +11,8 @@ A Claude Code mod that makes the links in Claude's replies and tool output click
 | a commit SHA, `e0497bd` | opens the commit on GitHub or GitLab |
 
 Under tool rows it lists what the output named: `↗ <url>` under any tool result, and `↗ <sha>` commit links under a
-`git` Bash call.
+`git` Bash call. Under your own prompts (typed, or a handover's launch prompt) it lists `↗ <path>` for every path
+named there that exists.
 
 Only the drawing changes. The stored message, and what the model reads, stay exactly as written.
 
@@ -90,7 +91,7 @@ Settings are kept across sessions.
 
 ```sh
 claude plugin validate .
-claude plugin test .     # 62 tests
+claude plugin test .     # 64 tests
 tsc -p .                 # after the engine has laid .claude-plugin/types/
 claude --plugin-dir .    # try it in a session
 ```

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 — 2026-11-28
+
+- Paths in your prompts are clickable: every existing path a prompt names (typed, or a handover's launch prompt
+  such as `read ~/.local/state/…/handoff.md first`) is listed as a `↗ <path>` link row under it. A prompt is drawn
+  as plain text, so the links go under it rather than into it; a `file://` link typed into the prompt is left alone.
+
 ## 0.1.1 — 2026-11-26
 
 - Marketplace description and the 🖱️ mark (README title, GitHub About) for the haiggoh catalog. No code change.
