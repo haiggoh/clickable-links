@@ -1,0 +1,10 @@
+{
+  "_comment": "How rtc-ship.sh ships THIS repo (run-to-completion's bin/rtc-ship.sh). The suite is the engine's own test host, not pytest.",
+  "tag_prefix": "v",
+  "default_branch": "main",
+  "manifest": ".claude-plugin/plugin.json",
+  "changelog": "CHANGELOG.md",
+  "test_cmd": "claude plugin test . && claude plugin validate .",
+  "refresh_plugin": "clickable-links",
+  "require_default_branch_checkout": true
+}
