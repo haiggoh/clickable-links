@@ -192,6 +192,25 @@ test('URLs in a tool result are listed as links under the result', async ($, on)
   expect((await ui.findAll({ type: 'Link' })).map(l => l.props.href)).toEqual(['https://a.dev/x'])
 })
 
+const prompt = ($: Engine, text: string) =>
+  $.ui.mount({ plugin: OUR_KEY, component: 'UserMessage', requestId: 'u1', props: { text, origin: { kind: 'composer' }, isExpanded: true }, surface: 'terminal', viewport: VIEWPORT })
+
+test('paths that exist in a prompt are listed as file links under it', async ($, on) => {
+  engine(on)
+  await start($)
+  const ui = await prompt($, `Continue: read ${FILE} first, then ${HOME}/gone.md.`)
+  const md = (await markdowns(ui)).find(m => m.key === `${OUR_KEY}-paths`)
+  expect(md?.text).toBe(`↗ [${FILE}](file://${FILE})`)
+  expect(md?.pressableLinks).toEqual([`file://${FILE}`])
+})
+
+test('a prompt naming no existing path is drawn as the engine draws it', async ($, on) => {
+  engine(on)
+  await start($)
+  const ui = await prompt($, `read ${HOME}/gone.md`)
+  expect((await markdowns(ui)).some(m => m.key === `${OUR_KEY}-paths`)).toBe(false)
+})
+
 test('SHAs printed by a git Bash call are listed as commit links under its row', async ($, on) => {
   engine(on)
   await start($)

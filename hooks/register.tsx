@@ -13,7 +13,7 @@ import { forgeCache } from './forge'
 import type { Forge } from './forge'
 import { outputTexts } from './output'
 import { DEFAULTS, MAX_FILE_HREFS, beforePaths, fileHrefs, transform, webHrefs } from './pipeline'
-import { escapeLabel, probes, rootOf, walk } from './paths'
+import { escapeLabel, probes, rewrite, rootOf, walk } from './paths'
 import type { Ctx, Entry, Kind, Lister, Mode, Prefs } from './paths'
 import { DEFAULT_CLICKS, pathOfFileHref, pressPlan } from './press'
 import type { Clicks } from './press'
@@ -382,6 +382,38 @@ export const register: Register = (on, options) => {
       return hrefs.length === 0 ? row : await linkRows($, e, row, hrefs.map(href => ({ href, label: href })), `${NAME}-urls`)
     } catch {
       return row
+    }
+  })
+
+  // Paths that exist in a prompt (a typed one, a handover's launch prompt), listed under it: the
+  // engine draws a prompt as plain text, so a markdown link in its text would show as brackets.
+  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
+    const row = await next(e)
+    if (prefs.mode === 'off') return row
+    try {
+      const ctx = await ctxOf($)
+      await lookUp($, probes(e.props.text, ctx, prefs), await $.clock.now(), ctx)
+      // Only links this stage made from a verified path; a file:// link typed into the prompt stays text.
+      const written = new Set(fileHrefs(e.props.text))
+      const hrefs = fileHrefs(rewrite(e.props.text, ctx, prefs, abs => cache.get(abs)?.kind ?? undefined)).filter(h => !written.has(h))
+      if (hrefs.length === 0) return row
+      const shown = hrefs.slice(0, MAX_ROWS)
+      const rest = hrefs.length - MAX_ROWS
+      // file:// cannot ride a native Link (https only), so the rows are one Markdown, as replies are.
+      const ours = e.surface === 'terminal' && e.viewport?.isFullscreen !== false && (await revealable($))
+      const { Box, Text, Markdown } = $.ui.resolve(e)
+      const text = shown.map(h => `↗ ${mdLink(pathOfFileHref(h) ?? h, h)}`).join('  \n')
+      return (
+        <Box flexDirection="column">
+          {row}
+          <Box paddingLeft={2} flexDirection="column">
+            <Markdown key={`${NAME}-paths`} text={text} pressableLinks={ours ? shown : []} onLinkPress={link => press($, link.href)} />
+            {rest > 0 ? <Text dimColor>{`  +${rest} more`}</Text> : null}
+          </Box>
+        </Box>
+      ) as RenderElement
+    } catch {
+      return row // never in the way of a prompt
     }
   })
 
